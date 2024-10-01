@@ -250,7 +250,7 @@ walk2(flash_updates_extracted$pub_date, flash_updates_extracted$par,
 
 I've manually pulled the number of soldiers killed in each day's Flash Update out to `data/raw/israel-killed.csv`.
 
-We'll add to this victims of the October 7 attacks, as reported by [Action on Armed Violence](https://aoav.org.uk/2023/an-analysis-of-the-7th-of-october-2023-casualties-in-israel-as-a-result-of-the-hamas-attack/) in December 2023.
+We'll add to this victims of the October 7 attacks, as reported by [Action on Armed Violence](https://aoav.org.uk/2023/an-analysis-of-the-7th-of-october-2023-casualties-in-israel-as-a-result-of-the-hamas-attack) in December 2023.
 
 ```{r}
 #| label: add-oct7
@@ -281,6 +281,8 @@ israel_casualties |>
     `Israel adults` = killed_adults) ->
 israel_fordw
 
+# write out for datawrapper, filling missing values in the israeli reports
 full_join(gaza_fordw, israel_fordw, join_by(date)) |>
-  write_csv(here("data", "adults-children-killed.csv"))
+  fill(starts_with("Israel")) |>
+  write_csv(here("data", "adults-children-killed.csv"), na = "")
 ```
