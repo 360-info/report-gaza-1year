@@ -1,0 +1,286 @@
+---
+title: Casualties between Palestine, Israel and Lebanon
+format:
+  360-analysis-html: default
+author: James Goldie
+date: last-modified
+code-fold: true
+---
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(rvest)
+library(here)
+```
+
+# Gaza
+
+```{r}
+#| label: load-data
+here("data", "raw", "gaza-casualties-daily.csv") |>
+  read_csv() ->
+gaza_casualties
+```
+
+Are there multiple reports on any given day?
+
+```{r}
+#| label: check-date-dupes
+gaza_casualties |>
+  count(report_date) |>
+  filter(n > 1)
+```
+
+Good! Let's compare the cumulative count to the daily casualty reports:
+
+```{r}
+#| label: compare-estimates
+gaza_casualties |>
+  select(report_date, killed, killed_cum) |>
+  mutate(
+    killed_filled = replace_na(killed, 0),
+    killed_cum_manual_upper = cumsum(killed_filled),
+    killed_cum_manual_lower = killed_cum_manual_upper - killed_filled) |>
+  ggplot() +
+    aes(x = report_date) +
+    geom_linerange(
+      aes(ymin = killed_cum_manual_lower, ymax = killed_cum_manual_upper),
+      colour = "slategrey") +
+    geom_line(
+      aes(y = killed_cum), colour = "orangered", linetype = "dashed") +
+    annotate_360_light(
+      x = as.Date("2023-11-01"), y = 39000, hjust = "inward",
+      label = paste(
+        "The Gaza Ministry of Health estimates that",
+        "**over 41 500 Palestinians** have died",
+        "as of September 29...",
+        sep = "<br>"
+      )
+    ) +
+    annotate_360_dark(
+      x = as.Date("2023-11-18"), y = 6300, hjust = "inward",
+      label = paste(
+        "... but not everyone is completely accounted for.",
+        "Identifying bodies, especially as hospitals are bombed",
+        "and their data is lost, makes counting the dead challenging.",
+        sep = "<br>"
+      )
+    ) +
+    scale_y_continuous(
+      labels = scales::label_number(scale_cut = scales::cut_short_scale())) +
+    theme_360() +
+    labs(
+      x = NULL, y = NULL,
+      title = toupper("Gaza casualties: Palestine"),
+      caption = paste(
+        "**CHART:** James Goldie, 360info",
+        "**DATA: Tech for Palestine <techforpalestine.org>",
+        sep = "<br>"
+      )) ->
+plot_gaza_casualty_estimate
+
+dir.create(here("out"), showWarnings = FALSE, recursive = TRUE)
+plot_gaza_casualty_estimate |>
+  save_360plot(here("out", "gaza-casualty-est.png"))
+```
+
+## Demographics
+
+Now let's break down demographics:
+
+
+```{r}
+#| label: demographics
+gaza_casualties |>
+  mutate(ext_killed_adults_cum = ext_killed_cum - ext_killed_children_cum) |>
+  select(
+    report_date,
+    Children = ext_killed_children_cum,
+    Adults = ext_killed_adults_cum) |>
+    mutate(pct_kids = Children / (Adults + Children)) |>
+  plot(pct_kids ~ report_date, data = _)
+
+  write_csv(here("data", "gaza-killed-adults-children.csv")) |>
+  pivot_longer(-report_date) |>
+  ggplot() +
+    aes(x = report_date, y = value, fill = name, colour = name) +
+    geom_area() +
+    scale_y_continuous(
+      labels = scales::label_number(scale_cut = scales::cut_short_scale()),
+      sec.axis = dup_axis()) +
+    guides(colour = "none", fill = "none") +
+    theme_360() +
+    theme(
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      panel.grid.minor.y = element_blank(),
+    ) +
+    annotate("text",
+      x = as.Date("2024-07-01"), y = 25000, hjust = "inward",
+      label = "Adults",
+      colour = "firebrick", family = "Body 360info", fontface = "bold", size = 8
+    ) +
+    annotate("text",
+      x = as.Date("2024-07-01"), y = 7000, hjust = "inward",
+      label = "Children",
+      colour = "navy", family = "Body 360info", fontface = "bold", size = 8
+    ) +
+    labs(
+      x = NULL, y = NULL,
+      title = toupper("Gaza casualties: Palestine"),
+      caption = paste(
+        "**CHART:** James Goldie, 360info",
+        "**DATA: Tech for Palestine <techforpalestine.org>",
+        sep = "<br>"
+      ))
+```
+
+# Israeli casualties
+
+OCHA Humanitarian Situation Updates (or "Flash Updates") contain estimates of Israeli casualties. I might be able to scrape the text to speed up getting the estimates for each day.
+
+The URLs seem to be pretty stable, but Wednesday updates are for West Bank, while Monday and Friday updates are for Gaza Strip. I'm just going to try them all and drop the ones that 404.
+
+Before May 31 2024, they have a different URL scheme but the same page structure.
+
+The update's article text is in `#section-content .content`, while the publication date is in `#section-content .content .date time`.
+
+```{r}
+#| label: scrape-fn
+scrape_ocha_update_text <- function(url) {
+  url |>
+    read_html() |>
+    html_elements("#section-content .content") ->
+  content
+
+  content |>
+    html_elements(".date time") |>
+    html_text() ->
+  pub_date
+
+  content |>
+    html_text() ->
+  article
+
+  return(list(pub_date = pub_date, article = article))
+}
+
+safe_slow_ocha_scrape <- safely(slowly(scrape_ocha_update_text, ))
+```
+
+```{r}
+#| label: scrape
+paste0(
+  "https://www.ochaopt.org/content/humanitarian-situation-update-",
+  173:223, 
+  "-gaza-strip") |>
+  tibble(url = _) |>
+  mutate(res = map(url, safe_slow_ocha_scrape)) ->
+flash_updates_since_may
+
+paste0(
+  "https://www.ochaopt.org/content/",
+  "hostilities-gaza-strip-and-israel-flash-update-",
+  1:172) |>
+  tibble(url = _) |>
+  mutate(res = map(url, safe_slow_ocha_scrape)) ->
+flash_updates_upto_may
+
+flash_updates_since_may |>
+  bind_rows(flash_updates_upto_may) ->
+flash_updates
+```
+```{r}
+#| label: extract-updates
+
+# drop the missing updates; extract dates and article text
+flash_updates |>
+  mutate(has_update = map_lgl(res, ~ !is.null(.x$result))) |>
+  filter(has_update) |>
+  mutate(
+    pub_date = dmy(map_chr(res, ~ .x$result$pub_date)),
+    article = map_chr(res, ~ .x$result$article)) ->
+flash_update_stories
+  
+# write each story out to disk
+dir.create(here("data", "raw", "flash-updates-gaza"), showWarnings = FALSE)
+walk2(flash_update_stories$pub_date, flash_update_stories$article,
+  ~ writeLines(.y,  here("data", "raw", "flash-updates-gaza",
+    paste0(.x, ".txt"))))
+```
+
+If we had more time, I'd consider using an LLM to automate the extraction of the relevant statistics from this. But for now, let's just go through the updates manually and pull them out. We'll put them into `data/israel-killed.csv`.
+
+Let's single out the par that contains the word 'Israelis', since usually that's where casualties are spoken about.
+
+
+```{r}
+#| label: extract-casualties
+
+extract_casualty_par <- function(article) {
+  article |>
+    str_split("[\\n\\t]+") |> pluck(1) |>
+    str_replace_all("\\s+", " ") ->
+  tidied_article
+
+  tidied_article |>
+    str_detect(coll("Israelis")) ->
+  to_keep
+  
+  # return the par (or full story if no match)
+  if (length(tidied_article[to_keep]) == 0) {
+    return(article)
+  } else {
+    return(paste(tidied_article[to_keep], collapse = "\n\n"))
+  }
+}
+
+flash_update_stories |>
+  mutate(par = map_chr(article, extract_casualty_par)) |>
+  filter(!is.na(par)) ->
+flash_updates_extracted
+
+# write each story out to disk
+dir.create(here("data", "raw", "flash-updates-extracted"), showWarnings = FALSE)
+walk2(flash_updates_extracted$pub_date, flash_updates_extracted$par,
+  ~ writeLines(.y,  here("data", "raw", "flash-updates-extracted",
+    paste0(.x, ".txt"))))
+```
+
+I've manually pulled the number of soldiers killed in each day's Flash Update out to `data/raw/israel-killed.csv`.
+
+We'll add to this victims of the October 7 attacks, as reported by [Action on Armed Violence](https://aoav.org.uk/2023/an-analysis-of-the-7th-of-october-2023-casualties-in-israel-as-a-result-of-the-hamas-attack/) in December 2023.
+
+```{r}
+#| label: add-oct7
+here("data", "raw", "israel-killed.csv") |>
+  read_csv() |>
+  mutate(
+    killed_all = killed_soldiers_gaza + 1269,
+    killed_children = 24,
+    killed_adults = killed_all - killed_children) ->
+israel_casualties
+```
+
+Let's combine Israeli and Palestinian casualties:
+
+```{r}
+#| label: join-countries
+gaza_casualties |>
+  mutate(ext_killed_adults_cum = ext_killed_cum - ext_killed_children_cum) |>
+  select(
+    date = report_date,
+    `Palestine children` = ext_killed_children_cum,
+    `Palestine adults` = ext_killed_adults_cum) ->
+gaza_fordw
+
+israel_casualties |>
+  select(date,
+    `Israel children` = killed_children,
+    `Israel adults` = killed_adults) ->
+israel_fordw
+
+full_join(gaza_fordw, israel_fordw, join_by(date)) |>
+  write_csv(here("data", "adults-children-killed.csv"))
+```

@@ -4,7 +4,7 @@
 {
 	"name": "R (rocker/r-ver base)",
 	/* set the r version here */
-	"image": "ghcr.io/rocker-org/devcontainer/r-ver:4.2",
+	"image": "ghcr.io/rocker-org/devcontainer/r-ver:4.3",
 	
 	/* set this to a recent cran freeze when you start working on a project
 	 find one at https://packagemanager.posit.co/client/#/repos/2/overview */
@@ -13,7 +13,7 @@
 	// },
 	"features": {
 		"ghcr.io/rocker-org/devcontainer-features/quarto-cli:1": {
-			"version": "prerelease"
+			"version": "latest"
 		},
 		/* node/npm used for sverto; can be removed if you're not using it */
 		// "ghcr.io/devcontainers/features/node:1": {
@@ -23,11 +23,11 @@
 		/* add apt packages (eg. system requirements for r packages) here.
 		   note that they are not frozen */
 		"ghcr.io/rocker-org/devcontainer-features/apt-packages:1": {
-			"packages": "libudunits2-dev,libxtst6,libxt6,libmagick++-dev,librsvg2-dev"
+			"packages": "libudunits2-dev,libxtst6,libxt6,libmagick++-dev,librsvg2-dev,libgdal-dev,libgeos-dev,libproj-dev"
 		},
 		/* add additional r packages here */
 		"ghcr.io/rocker-org/devcontainer-features/r-packages:1": {
-			"packages": "github::rstudio/renv,tidyverse,here,httpgd,janitor,github::360-info/themes360info"
+			"packages": "github::rstudio/renv,tidyverse,here,httpgd,janitor,sf,terra,github::360-info/themes360info"
 		}
 	},
 
