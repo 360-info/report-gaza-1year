@@ -11,6 +11,7 @@ code-fold: true
 #| label: setup
 library(tidyverse)
 library(rvest)
+library(httr2)
 library(here)
 ```
 
@@ -214,7 +215,6 @@ If we had more time, I'd consider using an LLM to automate the extraction of the
 
 Let's single out the par that contains the word 'Israelis', since usually that's where casualties are spoken about.
 
-
 ```{r}
 #| label: extract-casualties
 
@@ -283,6 +283,228 @@ israel_fordw
 
 # write out for datawrapper, filling missing values in the israeli reports
 full_join(gaza_fordw, israel_fordw, join_by(date)) |>
-  fill(starts_with("Israel")) |>
-  write_csv(here("data", "adults-children-killed.csv"), na = "")
+  fill(starts_with("Israel")) ->
+gaza_israel_casualties
+```
+
+# Lebanon
+
+Let's try to use the ACLED API to get an idea of casualties. It returns JSON by default, but you can return XML or CSVs by simply appending the file extension to the path (before the query string parameter).
+
+```{r}
+#| label: acled-credentials
+api_key   <- Sys.getenv("ACLED_API_KEY")
+api_email <- Sys.getenv("ACLED_API_EMAIL")
+api_root  <- "https://api.acleddata.com/"
+```
+
+```{r}
+#| label: get-data
+
+req_start <- as.Date("2023-10-06")
+req_end   <- Sys.Date()
+
+# no more pages needed if < 5000 rows returned
+request_complete <- function(resp) {
+  n_rows <-
+    resp |>
+    resp_body_string() |>
+    read_csv() |>
+    nrow()
+  n_rows < 5000
+}
+
+# run a series of requests, stopping when we get one
+# with < 5000 rows of data
+request(api_root) |>
+  req_url_path_append("acled") |>
+  req_url_path_append("read.csv") |>
+  req_url_query(
+    key = api_key,
+    email = api_email,
+    country = "Lebanon") |>
+  req_throttle(1 / 3) |>
+  req_perform_iterative(next_req =
+    iterate_with_offset("page",
+      resp_complete = request_complete)) ->
+events_list
+
+# now extract all the responses and g
+events_list |>
+  map(~ read_csv(resp_body_string(.x))) |>
+  bind_rows() ->
+all_events
+```
+
+Let's make sure we understand the shape of the data we're looking at. I want to focus on events in which Israel was one of the two actors listed:
+
+```{r}
+#| label: events-vis
+all_events |>
+  filter(str_detect(actor1, "Israel") | str_detect(actor2, "Israel")) ->
+lebanon_israel_events
+
+# total fatalities
+lebanon_israel_events |>
+  pull(fatalities) |>
+  sum(na.rmn = TRUE)
+```
+
+1224 fatalities squares well with media reports. What kind of events are they distributed across?
+
+```{r}
+# actors
+lebanon_israel_events |>
+  group_by(actor1, actor2) |>
+  summarise(
+    n_events = n(),
+    sum_fatalities = sum(fatalities, na.rm = TRUE)) |>
+  arrange(desc(sum_fatalities)) |>
+  print(n = Inf)
+
+# event distribution
+lebanon_israel_events |>
+  group_by(disorder_type, event_type, actor1, actor2) |>
+  summarise(
+    n_events = n(),
+    sum_fatalities = sum(fatalities, na.rm = TRUE)) |>
+    arrange(desc(sum_fatalities)) |>
+    View()
+```
+
+Looks like 
+
+The ACLED dataset does not assign any judgement to `actor1` and `actor2` respectively, and fatalities are not grouped by nationality or group, so it's difficult to know whether these are all Lebanese casualties.
+
+Let's look into the notes a bit more to see if we can work this out better. I see the phrase "Israeli warplanes carried out" in many events — how many events and fatalities is that?
+
+```{r}
+#| label: israeli-warplanes
+lebanon_israel_events |>
+  select(event_date, disorder_type, event_type, actor1, actor2, fatalities, notes) |>
+  filter(
+    str_detect(notes, "Israeli F-35 and F-15 fighter jets carried out") |
+    str_detect(notes, "Israeli warplanes carried out") |
+    str_detect(notes, "Israeli warplanes, including fighter jets, carried out") |
+    str_detect(notes, "Israeli airplanes carried out") | 
+    str_detect(notes, "Israeli jets carried out") |
+    str_detect(notes, "Israeli drones carried out") |
+    str_detect(notes, "Israeli drone carried out") |
+    str_detect(notes, "Israeli drone targeted") |
+    str_detect(notes, "Israeli drone struck") |
+    str_detect(notes, "Israeli drone directly struck") |
+    str_detect(notes, "Israeli drone fired rockets") |
+    str_detect(notes, "Israeli drone dropped") |
+    str_detect(notes, "Israeli fighter jets struck") |
+    str_detect(notes, "Israeli military fired artillery") |
+    str_detect(notes, "Israeli military fired mortar") |
+    str_detect(notes, "Israeli military forces shelled") |
+    str_detect(notes, "Israeli drone fired rockets") |
+    str_detect(notes, "Israeli military forces bombarded") |
+    str_detect(notes, "Israeli military launched a suicide drone")
+    ) ->
+israeli_air_events
+
+n_lebanon_israel_events <- lebanon_israel_events |> nrow()
+n_lebanon_israel_fatalities <-
+  lebanon_israel_events |> pull(fatalities) |> sum(na.rm = TRUE)
+
+# num events/fatalities from israeli warplanes
+n_israeli_air_events <-
+  israeli_air_events |> nrow()
+n_israeli_warplane_fatalities <- 
+  israeli_air_events |> pull(fatalities) |> sum(na.rm = TRUE)
+```
+
+`{r} scales::percent(n_israeli_air_events / n_lebanon_israel_events)` of events and about `{r} scales::percent(n_israeli_warplane_fatalities / n_lebanon_israel_fatalities)` of casualties are linked to the phrases of the form, "Israeli [planes/warplanes/jets/drones] carried out/struck/fired/dropped/targeted" in the Notes.
+
+Let's work out daily fatalities to combine with the Gaza and Israel counts. (We'll need a note about not being attribute all the fatalities to Lebanon in the final text.)
+
+```{r}
+#| label: daily-lebanon
+lebanon_israel_events |>
+  group_by(event_date) |>
+  summarise(fatalities = sum(fatalities, na.rm = TRUE)) |>
+  # cut to the first fatality
+  filter(event_date >= as.Date("2023-10-07")) |>
+  # work out cumulative
+  mutate(fatalities_cum = cumsum(fatalities)) |>
+  write_csv(here("data", "lebanon-killed.csv")) ->
+lebanon_casualties
+
+# merge with gaza and israel
+lebanon_casualties |>
+  select(date = event_date, `Killed in Lebanon` = fatalities_cum) |>
+  full_join(gaza_israel_casualties, join_by(date)) |>
+  arrange(date) |>
+  write_csv(here("data", "daily-killed-cumulative.csv"), na = "") ->
+all_casualties
+```
+
+# Extrapolate adult/child ratio for Gaza
+
+Michael Spagat, our author on this, is confused by the difference in adults and children killed in the cumulative daily counts from TFP and the named list. He's suggested we take the total figures there but extrapolate the adult/child fraction from their named lists of cases instead.
+
+TFP doesn't seem to offer _all_ of MoH's named lists — only the current one — but let's start with that.
+
+```{r}
+cum_pal_latest_children <-
+  gaza_israel_casualties |> tail(1) |> pull("Palestine children")
+cum_pal_latest_adults <-
+  gaza_israel_casualties |> tail(1) |> pull("Palestine adults")
+```
+
+The cumulative figures we had from TFP had `{r} cum_pal_latest_children` children (`{r} scales::percent(cum_pal_latest_children / (cum_pal_latest_adults + cum_pal_latest_children))`) and `{r} cum_pal_latest_adults` (`{r} scales::percent(cum_pal_latest_adults / (cum_pal_latest_adults + cum_pal_latest_children))`)
+
+It also doesn't classify casualties as adults or children. Let's see what the age breakdown is.
+
+```{r}
+#| label: download-named-list
+named_list_path <- here("data", "raw", "tfp-named-killed.csv")
+download.file(
+  "https://data.techforpalestine.org/api/v2/killed-in-gaza.csv",
+  named_list_path)
+
+named_list <- read_csv(named_list_path)
+
+# total
+nrow(named_list)
+  
+# current ratios
+named_list |>
+  mutate(age_group = cut(age, c(0, 5, 10, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 120))) |>
+  count(age_group) |>
+  mutate(
+    n_lte = cumsum(n),
+    pct_lte = n_lte / n_lte[n()]) ->
+named_agegroups
+```
+
+Here, 40.6% of casualties are under 21 under 22 or younger; just 31% are under 18. (Much lower than the 40% or so of children in the TFP data.)
+
+Unfortunately we can't verify whether this data has changed over time, as the TFP data only includes the latest list, not previous ones (and it doesn't have the date of death).
+
+But for now, we can apply this percentage to the TFP total killed and work out the upper and lower bounds for the number of children based on the respective percentages.
+
+
+```{r}
+#| label: rescale-figures
+pct_children_est <-
+  named_agegroups |> filter(age_group == "(16,17]") |> pull("pct_lte")
+
+all_casualties |>
+  janitor::clean_names() |>
+  rename(
+    palestine_children_tfp = palestine_children,
+    palestine_adults_tfp = palestine_adults
+    ) |>
+  mutate(
+    # recalculate the split with this new percentage
+    palestine_total = palestine_children_tfp + palestine_adults_tfp,
+    palestine_children_adj = palestine_total * pct_children_est,
+    palestine_contested = palestine_children_tfp - palestine_children_adj,
+    palestine_adults_adj =
+      palestine_total - palestine_children_adj - palestine_contested) |>
+  write_csv(here("data", "daily-killed-cumulative.csv"), na = "") ->
+all_casualties_rescaled
 ```
