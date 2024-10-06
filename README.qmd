@@ -1,14 +1,16 @@
 ---
 format: gfm
 360readme:
-  title: Title here
-  summary: One line summary here
-  repo: report-example
-  share-url: https://example.360visuals.org/example
+  title: "Gaza: one year on"
+  repo: report-gaza-1year
+  summary: "Visualises the human toll of October 7 and a year of war in Gaza and Lebanon."
+  share-url: https://360info.org
   data-sources: |
     <ul>
-      <li><a href="https://example.com">Example 1</a></li>
-      <li><a href="https://example.com">Example 2</a></li>
+      <li><a href="https://techforpalestine.org">Tech for Palestine</a></li>
+      <li><a href="https://acleddata.com">Armed Conflict Location & Event Data</a></li>
+      <li><a href="https://aoav.org.uk/2023/an-analysis-of-the-7th-of-october-2023-casualties-in-israel-as-a-result-of-the-hamas-attack">Action on Armed Violence</a></li>
+      <li><a href="https://www.ochaopt.org/crisis">United Nations Office for the Coordination of Humanitarian Affairs</a></li>
     </ul>
 ---
 
