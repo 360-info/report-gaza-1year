@@ -18,3 +18,10 @@ Thumbs.db
 # output folder (you may want to exclude files when we publish!)
 /out/*
 !/out
+
+# downloaded daily ocha flash updates
+/data/raw/flash-updates-extracted/*.txt
+/data/raw/flash-updates-gaza/*.txt
+
+
+.Renviron

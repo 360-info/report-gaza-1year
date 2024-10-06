@@ -508,3 +508,5 @@ all_casualties |>
   write_csv(here("data", "daily-killed-cumulative.csv"), na = "") ->
 all_casualties_rescaled
 ```
+
+Now we can show both estimates and and discuss some of the uncertainty involved.
