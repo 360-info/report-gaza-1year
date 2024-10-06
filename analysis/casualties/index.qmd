@@ -502,9 +502,9 @@ all_casualties |>
     # recalculate the split with this new percentage
     palestine_total = palestine_children_tfp + palestine_adults_tfp,
     palestine_children_adj = palestine_total * pct_children_est,
-    palestine_contested = palestine_children_tfp - palestine_children_adj,
+    palestine_unknown = palestine_children_tfp - palestine_children_adj,
     palestine_adults_adj =
-      palestine_total - palestine_children_adj - palestine_contested) |>
+      palestine_total - palestine_children_adj - palestine_unknown) |>
   write_csv(here("data", "daily-killed-cumulative.csv"), na = "") ->
 all_casualties_rescaled
 ```
